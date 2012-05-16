@@ -119,6 +119,8 @@ class Request(object):
     verbs GET, POST, PUT and DELETE.
     """
 
+    http = None
+
     def __init__(self, username=None, password=None, key_file=None,
                  cert_file=None):
         self.username = username
@@ -126,6 +128,19 @@ class Request(object):
         self.key_file = key_file
         self.cert_file = cert_file
         self._illegal_s = re.compile(r"((^|[^%])(%%)*%s)")
+
+        # Initialize shared http object if it isn't already done.
+        if self.http is None:
+            if options.DEBUG:
+                httplib2.debuglevel = 1
+            else:
+                httplib2.debuglevel = 0
+
+            if options.CACHE:
+                headers['Cache-Control'] = 'no-cache'
+                self.http = httplib2.Http(".cache")
+            else:
+                self.http = httplib2.Http()
 
     def get(self, url, headers=None):
         """
@@ -269,27 +284,16 @@ class Request(object):
         username = splits.username or self.username
         password = splits.password or self.password
         headers = headers or {}
-        if options.DEBUG:
-            httplib2.debuglevel = 1
-        else:
-            httplib2.debuglevel = 0
-        if options.CACHE:
-            headers['Cache-Control'] = 'no-cache'
-            http = httplib2.Http(".cache")
-        else:
-            http = httplib2.Http()
         if scheme.lower() == 'https':
-            http.add_certificate(self.key_file, self.cert_file, self.url)
+            self.http.add_certificate(self.key_file, self.cert_file, self.url)
         headers['Accept'] = 'application/json'
         headers['Accept-Encoding'] = '*'
         headers['Accept-Charset'] = 'ISO-8859-1,utf-8;q=0.7,*;q=0.7'
         # I'm not sure on the right policy about cache with Neo4j REST Server
         # headers['Cache-Control'] = 'no-cache'
-        # TODO: Handle all requests with the same Http object
-        headers['Connection'] = 'close'
         headers['User-Agent'] = 'Neo4jPythonClient/%s ' % __version__
         if username and password:
-            http.add_credentials(username, password)
+            self.http.add_credentials(username, password)
             credentials = "%s:%s" % (username, password)
             base64_credentials = base64.encodestring(credentials)
             authorization = "Basic %s" % base64_credentials[:-1]
@@ -305,7 +309,7 @@ class Request(object):
         # else:
         body = self._json_encode(data, ensure_ascii=True)
         try:
-            response, content = http.request(root_uri, method, headers=headers,
+            response, content = self.http.request(root_uri, method, headers=headers,
                                              body=body)
             if response.status == 401:
                 raise StatusException(401, "Authorization Required")
